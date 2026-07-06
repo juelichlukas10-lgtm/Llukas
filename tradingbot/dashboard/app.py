@@ -179,23 +179,65 @@ def _trades_tab(db: Database) -> None:
     st.plotly_chart(fig, use_container_width=True)
 
 
+@st.cache_data(ttl=60)
+def _fetch_live_ohlcv(exchange_name: str, symbol: str, timeframe_value: str, limit: int = 500) -> pd.DataFrame:
+    """Lädt aktuelle Kerzen direkt über die öffentliche CCXT-REST-API.
+
+    Fallback für Umgebungen ohne lokale Parquet-Daten (z. B. Streamlit
+    Community Cloud, deren Dateisystem flüchtig ist). Benötigt keine
+    API-Keys, da nur öffentliche Marktdaten abgerufen werden.
+    """
+    import ccxt
+
+    exchange_class = getattr(ccxt, exchange_name)
+    exchange = exchange_class({"enableRateLimit": True})
+    raw = exchange.fetch_ohlcv(symbol, timeframe_value, limit=limit)
+    df = pd.DataFrame(raw, columns=["timestamp", "open", "high", "low", "close", "volume"])
+    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
+    return df.set_index("timestamp")
+
+
 def _chart_tab(config: Config, db: Database, storage: CandleStorage) -> None:
-    """Candlestick-Chart mit eingezeichneten Trades."""
+    """Candlestick-Chart mit eingezeichneten Trades.
+
+    Nutzt lokale Parquet-Daten, falls vorhanden; andernfalls werden
+    aktuelle Kerzen live von der Börse nachgeladen (funktioniert auch
+    ohne vorherigen ``download``-Lauf, z. B. direkt nach dem Deployment).
+    """
     datasets = storage.list_datasets()
-    if not datasets:
+
+    if datasets:
+        labels = [f"{d['exchange']} | {d['symbol']} | {d['timeframe']}" for d in datasets]
+        choice = st.selectbox("Datensatz (lokal gespeichert)", labels)
+        dataset = datasets[labels.index(choice)]
+        exchange_name = dataset["exchange"]
+        symbol = dataset["symbol"]
+        timeframe = Timeframe.from_string(dataset["timeframe"])
+        df = storage.load(exchange_name, symbol, timeframe)
+    else:
         st.info(
-            "Keine lokalen Kerzendaten. Mit "
-            "`python main.py download --symbol BTC/USDT --timeframe 1h --start 2024-01-01` laden."
+            "Keine lokalen Kerzendaten gefunden – lade aktuelle Daten direkt von der Börse "
+            "(nur öffentliche Marktdaten, keine API-Keys nötig)."
         )
+        col1, col2, col3 = st.columns(3)
+        exchange_name = col1.text_input("Börse", value=config.trading.exchange)
+        symbol = col2.text_input("Symbol", value=config.trading.symbols[0])
+        timeframe_choice = col3.selectbox(
+            "Timeframe", [tf.value for tf in Timeframe],
+            index=list(Timeframe).index(config.trading.timeframe),
+        )
+        timeframe = Timeframe.from_string(timeframe_choice)
+        try:
+            df = _fetch_live_ohlcv(exchange_name, symbol, timeframe.value)
+        except Exception as exc:
+            st.error(f"Live-Daten konnten nicht geladen werden: {exc}")
+            return
+
+    if df.empty:
+        st.warning("Keine Kerzendaten verfügbar.")
         return
 
-    labels = [f"{d['exchange']} | {d['symbol']} | {d['timeframe']}" for d in datasets]
-    choice = st.selectbox("Datensatz", labels)
-    dataset = datasets[labels.index(choice)]
-    timeframe = Timeframe.from_string(dataset["timeframe"])
-
-    df = storage.load(dataset["exchange"], dataset["symbol"], timeframe)
-    max_candles = st.slider("Anzahl Kerzen", 100, min(5000, len(df)), min(500, len(df)))
+    max_candles = st.slider("Anzahl Kerzen", min(100, len(df)), len(df), min(500, len(df)))
     df = df.tail(max_candles)
 
     fig = make_subplots(
@@ -214,7 +256,7 @@ def _chart_tab(config: Config, db: Database, storage: CandleStorage) -> None:
     )
 
     # Trades des Symbols einzeichnen.
-    trades = db.get_trades(symbol=dataset["symbol"], limit=500)
+    trades = db.get_trades(symbol=symbol, limit=500)
     if trades:
         entries_x = [t.opened_at for t in trades]
         entries_y = [t.entry_price for t in trades]
