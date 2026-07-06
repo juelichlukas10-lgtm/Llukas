@@ -13,6 +13,7 @@ Start:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -33,6 +34,23 @@ from tradingbot.data.storage import CandleStorage  # noqa: E402
 from tradingbot.database.repository import Database  # noqa: E402
 
 
+def _bridge_streamlit_secrets_to_env() -> None:
+    """Kopiert Streamlit-Secrets in Umgebungsvariablen.
+
+    Auf Streamlit Community Cloud gibt es keine ``.env``-Datei; Secrets
+    werden stattdessen über ``st.secrets`` (aus der App-Einstellung
+    "Secrets") bereitgestellt. ``load_config`` liest jedoch ausschließlich
+    Umgebungsvariablen (z. B. ``TRADINGBOT_DB_URL``) – dieser Bridge macht
+    beide Wege kompatibel, ohne die Config-Schicht zu verändern.
+    """
+    try:
+        secrets = dict(st.secrets)
+    except st.errors.StreamlitSecretNotFoundError:
+        return  # Kein secrets.toml vorhanden (z. B. lokal ohne Secrets) – ok.
+    for key, value in secrets.items():
+        os.environ.setdefault(key, str(value))
+
+
 def _parse_args() -> argparse.Namespace:
     """Parst die hinter ``--`` übergebenen Streamlit-Argumente."""
     parser = argparse.ArgumentParser()
@@ -44,6 +62,7 @@ def _parse_args() -> argparse.Namespace:
 @st.cache_resource
 def _load(config_path: str) -> tuple[Config, Database, CandleStorage]:
     """Lädt Konfiguration, Datenbank und Datenspeicher (einmalig gecacht)."""
+    _bridge_streamlit_secrets_to_env()
     config = load_config(config_path)
     database = Database(url=config.database.url, echo=False)
     storage = CandleStorage(config.data.storage_dir)

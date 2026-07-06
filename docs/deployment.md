@@ -1,5 +1,70 @@
 # Deployment
 
+## Streamlit Community Cloud (Dashboard)
+
+Das Dashboard lässt sich kostenlos auf [share.streamlit.io](https://share.streamlit.io)
+hosten. Da Streamlit Cloud ein **flüchtiges Dateisystem** hat (SQLite und
+lokale Kerzendaten überleben keinen Neustart), betreibt man den Bot lokal/
+auf einem eigenen Server gegen eine **externe PostgreSQL-Datenbank** – das
+Cloud-Dashboard liest dieselbe Datenbank nur lesend aus.
+
+### 1. Kostenlose Postgres-Datenbank anlegen (Neon)
+
+1. Auf [neon.tech](https://neon.tech) registrieren (kostenloses Kontingent).
+2. „New Project" erstellen, Datenbankname z. B. `tradingbot`.
+3. Den angezeigten Connection-String kopieren, z. B.:
+   ```
+   postgresql://user:password@ep-xyz-123.eu-central-1.aws.neon.tech/tradingbot?sslmode=require
+   ```
+4. In eine SQLAlchemy-URL umwandeln (`postgresql` → `postgresql+psycopg2`):
+   ```
+   postgresql+psycopg2://user:password@ep-xyz-123.eu-central-1.aws.neon.tech/tradingbot?sslmode=require
+   ```
+
+### 2. Bot lokal auf Postgres umstellen
+
+In der lokalen `.env` ergänzen:
+
+```
+TRADINGBOT_DB_URL=postgresql+psycopg2://user:password@ep-xyz-123.eu-central-1.aws.neon.tech/tradingbot?sslmode=require
+```
+
+`TRADINGBOT_DB_URL` überschreibt `database.url` aus der `config.yaml`
+automatisch (siehe [configuration.md](configuration.md#database--persistenz)).
+Bot neu starten – Trades, Orders und Performance landen jetzt in Neon
+statt in der lokalen SQLite-Datei.
+
+### 3. Repo auf GitHub pushen (falls noch nicht geschehen)
+
+Streamlit Cloud deployt direkt aus einem GitHub-Repository. `.env` wird
+**nicht** mitcommitted (steht in `.gitignore`) – Secrets kommen auf der
+Cloud über einen separaten Mechanismus (Schritt 5).
+
+### 4. App auf Streamlit Cloud anlegen
+
+1. Auf [share.streamlit.io](https://share.streamlit.io) einloggen (GitHub-Login).
+2. „New app" → Repository und Branch (`main`) auswählen.
+3. **Main file path:** `tradingbot/dashboard/app.py`
+4. „Deploy!" klicken.
+
+### 5. Datenbank-Secret in Streamlit Cloud hinterlegen
+
+In der App-Verwaltung auf Streamlit Cloud: **Settings → Secrets** und
+folgendes eintragen (TOML-Format):
+
+```toml
+TRADINGBOT_DB_URL = "postgresql+psycopg2://user:password@ep-xyz-123.eu-central-1.aws.neon.tech/tradingbot?sslmode=require"
+```
+
+Das Dashboard liest Streamlit-Secrets automatisch als Umgebungsvariable
+ein (Bridge in `tradingbot/dashboard/app.py`) und verbindet sich damit
+mit derselben Datenbank wie der lokal laufende Bot. Nach dem Speichern
+startet die App automatisch neu.
+
+> Lokal für Tests kann dieselbe Secret-Struktur auch in
+> `.streamlit/secrets.toml` abgelegt werden – diese Datei gehört **nicht**
+> ins Git-Repo (analog zu `.env`).
+
 ## Docker (empfohlen)
 
 ```bash
