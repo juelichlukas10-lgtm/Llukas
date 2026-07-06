@@ -1,0 +1,134 @@
+# =====================================================================
+# TradingBot – Zentrale Konfiguration
+# ---------------------------------------------------------------------
+# Alle Parameter des Bots werden hier konfiguriert.
+# Geheimnisse (API-Keys, Tokens, Passwoerter) gehoeren in die .env-Datei
+# und werden ausschliesslich ueber Umgebungsvariablen geladen.
+# =====================================================================
+
+app:
+  name: "TradingBot"
+  timezone: "UTC"
+
+trading:
+  # Betriebsmodus: "paper" (Standard, simulierte Ausfuehrung) oder "live".
+  # Live-Trading ist NUR aktiv, wenn mode="live" UND live_trading_confirmed=true.
+  mode: "paper"
+  live_trading_confirmed: false
+
+  exchange: "binance"          # binance | bybit | okx | kraken
+  market_type: "spot"          # spot | futures
+  symbols:
+    - "BTC/USDT"
+    - "ETH/USDT"
+  timeframe: "5m"              # Haupt-Timeframe der Strategie-Auswertung
+  candle_history: 300          # Anzahl Kerzen, die Strategien als Kontext erhalten
+  loop_interval_seconds: 10    # Intervall der Haupt-Loop (Signalpruefung)
+
+paper:
+  initial_balance: 10000.0     # Startkapital in Quote-Waehrung
+  commission_rate: 0.001       # 0.1 % Kommission pro Fill
+  slippage_rate: 0.0005        # 0.05 % Slippage auf Marktorders
+  spread_rate: 0.0002          # 0.02 % kuenstlicher Spread
+
+exchanges:
+  binance:
+    testnet: false
+    rate_limit: true
+    options: {}
+  bybit:
+    testnet: false
+    rate_limit: true
+    options: {}
+  okx:
+    testnet: false
+    rate_limit: true
+    options: {}
+  kraken:
+    testnet: false
+    rate_limit: true
+    options: {}
+
+strategies:
+  # Aktive Strategien. Jede Strategie ist ein Plugin in tradingbot/strategies/.
+  # "name" muss dem Registry-Namen der Strategie entsprechen.
+  active:
+    - name: "ema_crossover"
+      symbols: ["BTC/USDT"]
+      timeframe: "5m"
+      params:
+        fast_period: 12
+        slow_period: 26
+    - name: "rsi"
+      symbols: ["ETH/USDT"]
+      timeframe: "15m"
+      params:
+        period: 14
+        oversold: 30
+        overbought: 70
+
+risk:
+  risk_per_trade: 0.01           # 1 % des Kapitals pro Trade riskieren
+  max_open_positions: 5
+  max_daily_loss: 0.03           # 3 % Tagesverlust -> Handelsstopp
+  max_drawdown: 0.15             # 15 % Drawdown -> Handelsstopp
+  max_daily_trades: 20
+  max_leverage: 3.0
+  stop_loss: 0.02                # 2 % Stop-Loss (Fallback, Strategien koennen ueberschreiben)
+  take_profit: 0.04              # 4 % Take-Profit
+  trailing_stop: 0.015           # 1.5 % Trailing-Abstand (0 = deaktiviert)
+  break_even_trigger: 0.01       # Bei +1 % SL auf Einstand ziehen (0 = deaktiviert)
+  loss_streak_cooldown:
+    max_consecutive_losses: 3
+    cooldown_minutes: 60
+
+sizing:
+  # method: fixed | percent_risk | kelly | atr
+  method: "percent_risk"
+  fixed_amount: 500.0            # Quote-Betrag bei method=fixed
+  kelly_fraction: 0.5            # Sicherheitsfaktor auf Kelly-Anteil
+  kelly_lookback: 30             # Trades fuer Kelly-Schaetzung
+  atr_period: 14
+  atr_risk_multiple: 1.5         # SL-Distanz = atr_risk_multiple * ATR
+
+database:
+  # SQLAlchemy-URL. Standard: SQLite im Projektordner.
+  # PostgreSQL: via Umgebungsvariable TRADINGBOT_DB_URL ueberschreibbar.
+  url: "sqlite:///storage/tradingbot.db"
+  echo: false
+
+data:
+  storage_dir: "storage/historical"
+  backtest_dir: "storage/backtests"
+  download_batch_size: 1000      # Kerzen pro REST-Request beim Download
+
+logging:
+  level: "INFO"                  # DEBUG | INFO | WARNING | ERROR
+  dir: "logs"
+  file_name: "tradingbot.log"
+  max_bytes: 10485760            # 10 MB pro Datei
+  backup_count: 10
+  console: true
+  json_format: false             # true -> strukturierte JSON-Logs
+
+notifications:
+  enabled: false
+  channels: []                   # discord | telegram | email
+  events:
+    trade_opened: true
+    trade_closed: true
+    error: true
+    max_drawdown: true
+    daily_loss: true
+
+dashboard:
+  host: "0.0.0.0"
+  port: 8501
+  refresh_seconds: 5
+
+backtest:
+  initial_balance: 10000.0
+  commission_rate: 0.001
+  slippage_rate: 0.0005
+  spread_rate: 0.0002
+  leverage: 1.0

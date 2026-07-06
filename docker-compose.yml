@@ -1,0 +1,65 @@
+# TradingBot – Docker Compose
+#
+#   docker compose up -d bot                    # Bot (Paper-Modus)
+#   docker compose up -d dashboard              # Dashboard auf Port 8501
+#   docker compose --profile postgres up -d     # zusätzlich PostgreSQL
+
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: tradingbot
+    env_file:
+      - .env
+    volumes:
+      - ./config:/app/config:ro
+      - ./storage:/app/storage
+      - ./logs:/app/logs
+    restart: unless-stopped
+    command: ["run"]
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: tradingbot-dashboard
+    env_file:
+      - .env
+    volumes:
+      - ./config:/app/config:ro
+      - ./storage:/app/storage
+      - ./logs:/app/logs
+    ports:
+      - "8501:8501"
+    restart: unless-stopped
+    entrypoint: ["python", "-m", "streamlit", "run", "tradingbot/dashboard/app.py"]
+    command:
+      [
+        "--server.port", "8501",
+        "--server.address", "0.0.0.0",
+        "--server.headless", "true",
+        "--", "--config", "config/config.yaml",
+      ]
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: tradingbot-postgres
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_DB: tradingbot
+      POSTGRES_USER: tradingbot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tradingbot}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tradingbot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
