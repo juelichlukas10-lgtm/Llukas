@@ -1,0 +1,10 @@
+# Zusätzliche Abhängigkeiten NUR für die lokale Windows-Tray-App
+# (tradingbot/tray_app.py). NICHT in requirements.txt aufnehmen –
+# Streamlit Community Cloud installiert requirements.txt auf Linux,
+# wo pystray nicht benötigt wird und zusätzliche Systempakete bräuchte.
+#
+# Installation:
+#   pip install -r requirements-desktop.txt
+
+pystray>=0.19.5
+Pillow>=10.0.0

@@ -31,6 +31,10 @@ dashboard = [
 postgres = [
     "psycopg2-binary>=2.9.9",
 ]
+desktop = [
+    "pystray>=0.19.5",
+    "Pillow>=10.0.0",
+]
 dev = [
     "pytest>=8.2.0",
     "pytest-asyncio>=0.23.0",

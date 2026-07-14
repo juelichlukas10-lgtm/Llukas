@@ -59,6 +59,25 @@ python main.py run
 python main.py dashboard
 ```
 
+## Windows: Als Hintergrund-App mit Autostart (ohne Terminal)
+
+Statt den Bot manuell über `python main.py run` zu starten, lässt er sich
+als System-Tray-App einrichten, die automatisch bei der Windows-Anmeldung
+startet – ganz ohne sichtbares Terminal-Fenster:
+
+```powershell
+pip install -r requirements-desktop.txt
+powershell -ExecutionPolicy Bypass -File scripts\install_autostart.ps1
+```
+
+Danach erscheint ein Icon in der Taskleiste (unten rechts), über das sich
+Bot und Dashboard starten/stoppen lassen (Rechtsklick fürs Menü,
+Doppelklick öffnet direkt das Dashboard im Browser). Ab dem nächsten
+Windows-Login startet der Bot automatisch von selbst.
+
+Entfernen: `powershell -File scripts\uninstall_autostart.ps1`
+(beendet keine bereits laufende Instanz – dafür im Tray-Menü „Beenden“ wählen).
+
 ## CLI-Befehle
 
 ```bash

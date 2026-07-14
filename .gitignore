@@ -32,3 +32,6 @@ htmlcov/
 # IDE
 .idea/
 .vscode/
+
+# Lokal generierte Autostart-Launcher (maschinenspezifische Pfade)
+scripts/tradingbot_launcher.vbs
