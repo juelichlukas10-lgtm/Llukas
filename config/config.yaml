@@ -66,6 +66,27 @@ strategies:
         period: 14
         oversold: 30
         overbought: 70
+    - name: "scalping"
+      symbols: ["BTC/USDT"]
+      timeframe: "1m"
+      params:
+        ema_period: 21
+        stoch_period: 14
+        target_pct: 0.004
+        stop_pct: 0.003
+    - name: "macd"
+      symbols: ["SOL/USDT"]
+      timeframe: "1h"
+      params:
+        fast_period: 12
+        slow_period: 26
+        signal_period: 9
+    - name: "bollinger"
+      symbols: ["BNB/USDT"]
+      timeframe: "15m"
+      params:
+        bb_period: 20
+        std_dev: 2.0
 
 risk:
   risk_per_trade: 0.01           # 1 % des Kapitals pro Trade riskieren
