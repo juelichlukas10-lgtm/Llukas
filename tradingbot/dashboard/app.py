@@ -179,22 +179,64 @@ def _trades_tab(db: Database) -> None:
     st.plotly_chart(fig, use_container_width=True)
 
 
+#: Ausweich-Börsen, falls die bevorzugte Börse aus der Hosting-Region des
+#: Dashboards blockiert ist (z. B. Binance mit HTTP 451 auf manchen
+#: Cloud-Anbietern). Kraken zuerst, da als US-Börse praktisch nie
+#: geo-gesperrt.
+_FALLBACK_EXCHANGES = ["kraken", "bybit", "okx", "binance"]
+
+
 @st.cache_data(ttl=60)
-def _fetch_live_ohlcv(exchange_name: str, symbol: str, timeframe_value: str, limit: int = 500) -> pd.DataFrame:
+def _fetch_live_ohlcv(
+    preferred_exchange: str, symbol: str, timeframe_value: str, limit: int = 500
+) -> tuple[pd.DataFrame, str]:
     """Lädt aktuelle Kerzen direkt über die öffentliche CCXT-REST-API.
 
     Fallback für Umgebungen ohne lokale Parquet-Daten (z. B. Streamlit
     Community Cloud, deren Dateisystem flüchtig ist). Benötigt keine
     API-Keys, da nur öffentliche Marktdaten abgerufen werden.
+
+    Versucht zunächst ``preferred_exchange``; scheitert dieser (z. B. wegen
+    einer Geo-Sperre oder eines auf der Börse nicht gelisteten Symbols),
+    werden der Reihe nach die in :data:`_FALLBACK_EXCHANGES` gelisteten
+    Börsen probiert.
+
+    Args:
+        preferred_exchange: Zuerst zu versuchende Börse.
+        symbol: Handelspaar, z. B. ``"BTC/USDT"``.
+        timeframe_value: Timeframe-String, z. B. ``"1h"``.
+        limit: Maximale Anzahl Kerzen.
+
+    Returns:
+        Tuple aus (OHLCV-DataFrame, tatsächlich verwendeter Börsenname).
+
+    Raises:
+        RuntimeError: Wenn keine der Kandidaten-Börsen Daten liefert.
     """
     import ccxt
 
-    exchange_class = getattr(ccxt, exchange_name)
-    exchange = exchange_class({"enableRateLimit": True})
-    raw = exchange.fetch_ohlcv(symbol, timeframe_value, limit=limit)
-    df = pd.DataFrame(raw, columns=["timestamp", "open", "high", "low", "close", "volume"])
-    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
-    return df.set_index("timestamp")
+    candidates = [preferred_exchange] + [
+        name for name in _FALLBACK_EXCHANGES if name != preferred_exchange
+    ]
+    last_error: Exception | None = None
+
+    for name in candidates:
+        exchange_class = getattr(ccxt, name, None)
+        if exchange_class is None:
+            continue
+        try:
+            exchange = exchange_class({"enableRateLimit": True})
+            raw = exchange.fetch_ohlcv(symbol, timeframe_value, limit=limit)
+            df = pd.DataFrame(raw, columns=["timestamp", "open", "high", "low", "close", "volume"])
+            df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
+            return df.set_index("timestamp"), name
+        except Exception as exc:  # Geo-Sperre, unbekanntes Symbol, Netzwerkfehler, ...
+            last_error = exc
+            continue
+
+    raise RuntimeError(
+        f"Keine der Börsen {candidates} lieferte Daten für {symbol}: {last_error}"
+    )
 
 
 def _chart_tab(config: Config, db: Database, storage: CandleStorage) -> None:
@@ -228,10 +270,16 @@ def _chart_tab(config: Config, db: Database, storage: CandleStorage) -> None:
         )
         timeframe = Timeframe.from_string(timeframe_choice)
         try:
-            df = _fetch_live_ohlcv(exchange_name, symbol, timeframe.value)
+            df, used_exchange = _fetch_live_ohlcv(exchange_name, symbol, timeframe.value)
         except Exception as exc:
             st.error(f"Live-Daten konnten nicht geladen werden: {exc}")
             return
+        if used_exchange != exchange_name:
+            st.caption(
+                f'„{exchange_name}" war nicht erreichbar (z. B. Geo-Sperre) – '
+                f'zeige stattdessen Daten von „{used_exchange}".'
+            )
+        exchange_name = used_exchange
 
     if df.empty:
         st.warning("Keine Kerzendaten verfügbar.")
