@@ -177,6 +177,52 @@ class ScannerStatusRecord(Base):
     running: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class ScannerPortfolioRecord(Base):
+    """Bargeldbestand des Scanner-Paper-Depots (genau eine Zeile, id=1)."""
+
+    __tablename__ = "scanner_portfolio"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    cash: Mapped[float] = mapped_column(Float, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ScannerPositionRecord(Base):
+    """Offene Paper-Trading-Position des Scanners (eine je Symbol)."""
+
+    __tablename__ = "scanner_positions"
+
+    symbol: Mapped[str] = mapped_column(String(24), primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), default="")
+    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    entry_price: Mapped[float] = mapped_column(Float, nullable=False)
+    stop_loss: Mapped[float] = mapped_column(Float, nullable=False)
+    target_1: Mapped[float] = mapped_column(Float, nullable=False)
+    target_2: Mapped[float] = mapped_column(Float, nullable=False)
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    partial_exit_done: Mapped[int] = mapped_column(Integer, default=0)
+    fees_paid: Mapped[float] = mapped_column(Float, default=0.0)
+    realized_pnl: Mapped[float] = mapped_column(Float, default=0.0)
+
+
+class ScannerTradeRecord(Base):
+    """Abgeschlossener (Teil-)Trade des Scanner-Paper-Depots."""
+
+    __tablename__ = "scanner_trades"
+    __table_args__ = (Index("ix_scanner_trades_closed_at", "closed_at"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(24), nullable=False)
+    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    entry_price: Mapped[float] = mapped_column(Float, nullable=False)
+    exit_price: Mapped[float] = mapped_column(Float, nullable=False)
+    pnl: Mapped[float] = mapped_column(Float, nullable=False)
+    fees: Mapped[float] = mapped_column(Float, default=0.0)
+    exit_reason: Mapped[str] = mapped_column(String(20), default="")
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    closed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class BacktestRecord(Base):
     """Ergebnis eines Backtest-Laufs inklusive Kennzahlen."""
 

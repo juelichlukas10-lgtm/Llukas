@@ -6,13 +6,16 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from tradingbot.core.config import Config
+from datetime import datetime, timezone
+
+from tradingbot.core.config import Config, ScannerPaperTradingConfig
 from tradingbot.core.exceptions import ConfigError
 from tradingbot.database.repository import Database
 from tradingbot.scanner.data_provider import StockDataProvider
 from tradingbot.scanner.detector import DetectorConfig, DipDetector
 from tradingbot.scanner.engine import ScannerEngine
-from tradingbot.scanner.models import SetupStatus
+from tradingbot.scanner.models import DipSignal, SetupStatus, SupportType
+from tradingbot.scanner.paper_trader import ScannerPaperTrader
 from tradingbot.scanner.scoring import DipScorer, ScoreFactors
 from tradingbot.scanner.universe import BUILTIN_UNIVERSES, load_universe
 
@@ -351,4 +354,192 @@ class TestScannerEngine:
 
         stats = await engine.scan_once()
         assert stats.signals_found == 0
+        db.close()
+
+
+# ----------------------------------------------------------------------
+# Paper-Trading
+# ----------------------------------------------------------------------
+
+
+def _make_signal(
+    symbol: str = "AAA",
+    status: SetupStatus = SetupStatus.ENTRY,
+    price: float = 100.0,
+    entry_price: float = 100.0,
+    stop_loss: float = 95.0,
+    target_1: float = 108.0,
+    target_2: float = 116.0,
+    score: float = 80.0,
+) -> DipSignal:
+    now = datetime.now(timezone.utc)
+    return DipSignal(
+        symbol=symbol, name=symbol, status=status, score=score, price=price,
+        change_pct=0.01, recent_high=target_1, drawdown_pct=0.07,
+        support_type=SupportType.EMA20, support_level=stop_loss + 1, support_distance_pct=0.01,
+        trend_strength=0.8, rsi=45.0, volume=1_000_000.0, volume_ratio=1.0,
+        relative_strength=0.05, atr=2.0, entry_price=entry_price, stop_loss=stop_loss,
+        target_1=target_1, target_2=target_2, risk_reward=2.0,
+        detected_at=now, updated_at=now,
+    )
+
+
+def _price_df(price: float, n: int = 5) -> pd.DataFrame:
+    """Minimaler OHLCV-Frame mit konstantem Schlusskurs (für Exit-Checks)."""
+    return _make_df(np.full(n, price))
+
+
+class TestScannerPaperTrader:
+    def _trader(self, db: Database, **overrides) -> ScannerPaperTrader:
+        config = ScannerPaperTradingConfig(initial_balance=10_000.0, risk_per_trade=0.02, **overrides)
+        return ScannerPaperTrader(config, db)
+
+    def test_opens_position_on_entry_signal(self) -> None:
+        db = Database(url="sqlite:///:memory:")
+        trader = self._trader(db)
+        signal = _make_signal()
+
+        opened, closed = trader.process_cycle(
+            {"AAA": signal}, {"AAA": _price_df(100.0)}, set()
+        )
+
+        assert len(opened) == 1
+        assert opened[0].symbol == "AAA"
+        assert closed == []
+        assert "AAA" in trader.open_positions
+        snapshot = trader.snapshot()
+        assert snapshot.open_positions == 1
+        assert snapshot.cash < 10_000.0  # Kapital für den Kauf reserviert
+        db.close()
+
+    def test_does_not_reenter_existing_position(self) -> None:
+        db = Database(url="sqlite:///:memory:")
+        trader = self._trader(db)
+        signal = _make_signal()
+        trader.process_cycle({"AAA": signal}, {"AAA": _price_df(100.0)}, set())
+
+        opened_again, _ = trader.process_cycle(
+            {"AAA": signal}, {"AAA": _price_df(100.0)}, set()
+        )
+        assert opened_again == []
+        assert len(trader.open_positions) == 1
+        db.close()
+
+    def test_stop_loss_exit(self) -> None:
+        db = Database(url="sqlite:///:memory:")
+        trader = self._trader(db)
+        signal = _make_signal(stop_loss=95.0)
+        trader.process_cycle({"AAA": signal}, {"AAA": _price_df(100.0)}, set())
+
+        _, closed = trader.process_cycle({}, {"AAA": _price_df(94.0)}, set())
+
+        assert len(closed) == 1
+        assert closed[0].exit_reason == "stop_loss"
+        assert closed[0].pnl < 0
+        assert "AAA" not in trader.open_positions
+        db.close()
+
+    def test_partial_exit_at_target1_moves_stop_to_breakeven(self) -> None:
+        db = Database(url="sqlite:///:memory:")
+        trader = self._trader(db, partial_exit_at_target1=True)
+        signal = _make_signal(entry_price=100.0, stop_loss=95.0, target_1=108.0, target_2=116.0)
+        trader.process_cycle({"AAA": signal}, {"AAA": _price_df(100.0)}, set())
+        original_amount = trader.open_positions["AAA"].amount
+
+        _, closed = trader.process_cycle({}, {"AAA": _price_df(109.0)}, set())
+
+        assert len(closed) == 1
+        assert closed[0].exit_reason == "target_1"
+        assert closed[0].pnl > 0
+        remaining = trader.open_positions["AAA"]
+        assert remaining.partial_exit_done is True
+        assert remaining.stop_loss == pytest.approx(100.0)  # auf Einstand gezogen
+        assert remaining.amount == pytest.approx(original_amount / 2, rel=0.01)
+        db.close()
+
+    def test_target2_closes_remaining_position(self) -> None:
+        db = Database(url="sqlite:///:memory:")
+        trader = self._trader(db, partial_exit_at_target1=True)
+        signal = _make_signal(entry_price=100.0, stop_loss=95.0, target_1=108.0, target_2=116.0)
+        trader.process_cycle({"AAA": signal}, {"AAA": _price_df(100.0)}, set())
+        trader.process_cycle({}, {"AAA": _price_df(109.0)}, set())  # Teilverkauf
+
+        _, closed = trader.process_cycle({}, {"AAA": _price_df(117.0)}, set())
+
+        assert len(closed) == 1
+        assert closed[0].exit_reason == "target_2"
+        assert "AAA" not in trader.open_positions
+        db.close()
+
+    def test_full_exit_when_partial_disabled(self) -> None:
+        db = Database(url="sqlite:///:memory:")
+        trader = self._trader(db, partial_exit_at_target1=False)
+        signal = _make_signal(entry_price=100.0, stop_loss=95.0, target_1=108.0, target_2=116.0)
+        trader.process_cycle({"AAA": signal}, {"AAA": _price_df(100.0)}, set())
+
+        _, closed = trader.process_cycle({}, {"AAA": _price_df(109.0)}, set())
+
+        assert len(closed) == 1
+        assert closed[0].exit_reason == "target_1"
+        assert "AAA" not in trader.open_positions  # voll geschlossen, kein Rest
+        db.close()
+
+    def test_invalidated_setup_triggers_immediate_exit(self) -> None:
+        db = Database(url="sqlite:///:memory:")
+        trader = self._trader(db)
+        signal = _make_signal()
+        trader.process_cycle({"AAA": signal}, {"AAA": _price_df(100.0)}, set())
+
+        _, closed = trader.process_cycle({}, {"AAA": _price_df(101.0)}, {"AAA"})
+
+        assert len(closed) == 1
+        assert closed[0].exit_reason == "invalidated"
+        db.close()
+
+    def test_respects_max_open_positions(self) -> None:
+        db = Database(url="sqlite:///:memory:")
+        trader = self._trader(db, max_open_positions=1)
+        signals = {
+            "AAA": _make_signal(symbol="AAA", score=90.0),
+            "BBB": _make_signal(symbol="BBB", score=70.0),
+        }
+        price_data = {"AAA": _price_df(100.0), "BBB": _price_df(100.0)}
+
+        opened, _ = trader.process_cycle(signals, price_data, set())
+
+        assert len(opened) == 1
+        assert opened[0].symbol == "AAA"  # hoeherer Score zuerst
+        db.close()
+
+    def test_insufficient_cash_skips_entry(self) -> None:
+        db = Database(url="sqlite:///:memory:")
+        trader = self._trader(db)
+        trader._cash = 0.0  # Depot leer
+
+        opened, _ = trader.process_cycle(
+            {"AAA": _make_signal()}, {"AAA": _price_df(100.0)}, set()
+        )
+        assert opened == []
+        db.close()
+
+    def test_disabled_trader_does_nothing(self) -> None:
+        db = Database(url="sqlite:///:memory:")
+        trader = self._trader(db, enabled=False)
+
+        opened, closed = trader.process_cycle(
+            {"AAA": _make_signal()}, {"AAA": _price_df(100.0)}, set()
+        )
+        assert opened == [] and closed == []
+        db.close()
+
+    def test_positions_persist_and_reload(self) -> None:
+        db = Database(url="sqlite:///:memory:")
+        trader = self._trader(db)
+        trader.process_cycle({"AAA": _make_signal()}, {"AAA": _price_df(100.0)}, set())
+
+        reloaded = self._trader(db)
+        assert "AAA" in reloaded.open_positions
+        assert reloaded.open_positions["AAA"].amount == pytest.approx(
+            trader.open_positions["AAA"].amount
+        )
         db.close()

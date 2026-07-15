@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterator
 
 if TYPE_CHECKING:
-    from tradingbot.scanner.models import DipSignal
+    from tradingbot.scanner.models import DipSignal, ScannerPosition, ScannerTrade
 
 from sqlalchemy import create_engine, delete, select
 from sqlalchemy.engine import Engine
@@ -32,8 +32,11 @@ from tradingbot.database.models import (
     OrderRecord,
     PerformanceRecord,
     PositionRecord,
+    ScannerPortfolioRecord,
+    ScannerPositionRecord,
     ScannerSignalRecord,
     ScannerStatusRecord,
+    ScannerTradeRecord,
     StrategyRecord,
     TradeRecord,
 )
@@ -498,3 +501,87 @@ class Database:
         """Metadaten des letzten Scan-Durchlaufs oder None."""
         with self.session() as session:
             return session.get(ScannerStatusRecord, 1)
+
+    # ------------------------------------------------------------------
+    # Scanner-Paper-Trading
+    # ------------------------------------------------------------------
+
+    def get_scanner_cash(self, default: float) -> float:
+        """Aktueller Bargeldbestand des Scanner-Depots.
+
+        Legt beim ersten Aufruf eine Portfolio-Zeile mit ``default`` an.
+        """
+        with self.session() as session:
+            record = session.get(ScannerPortfolioRecord, 1)
+            if record is None:
+                session.add(
+                    ScannerPortfolioRecord(id=1, cash=default, updated_at=datetime.now(timezone.utc))
+                )
+                return default
+            return record.cash
+
+    def save_scanner_cash(self, cash: float) -> None:
+        """Aktualisiert den Bargeldbestand des Scanner-Depots."""
+        with self.session() as session:
+            session.merge(
+                ScannerPortfolioRecord(id=1, cash=cash, updated_at=datetime.now(timezone.utc))
+            )
+
+    def save_scanner_position(self, position: "ScannerPosition") -> None:
+        """Speichert/aktualisiert eine offene Scanner-Position."""
+        with self.session() as session:
+            session.merge(
+                ScannerPositionRecord(
+                    symbol=position.symbol,
+                    name=position.name,
+                    amount=position.amount,
+                    entry_price=position.entry_price,
+                    stop_loss=position.stop_loss,
+                    target_1=position.target_1,
+                    target_2=position.target_2,
+                    opened_at=position.opened_at,
+                    partial_exit_done=1 if position.partial_exit_done else 0,
+                    fees_paid=position.fees_paid,
+                    realized_pnl=position.realized_pnl,
+                )
+            )
+
+    def delete_scanner_position(self, symbol: str) -> None:
+        """Entfernt eine (vollständig geschlossene) Scanner-Position."""
+        with self.session() as session:
+            session.execute(
+                delete(ScannerPositionRecord).where(ScannerPositionRecord.symbol == symbol)
+            )
+
+    def get_scanner_positions(self) -> list[ScannerPositionRecord]:
+        """Alle offenen Scanner-Positionen."""
+        with self.session() as session:
+            return list(session.scalars(select(ScannerPositionRecord)).all())
+
+    def save_scanner_trade(self, trade: "ScannerTrade") -> None:
+        """Persistiert einen abgeschlossenen (Teil-)Trade des Scanner-Depots."""
+        from tradingbot.core.models import new_id
+
+        with self.session() as session:
+            session.add(
+                ScannerTradeRecord(
+                    id=new_id(),
+                    symbol=trade.symbol,
+                    amount=trade.amount,
+                    entry_price=trade.entry_price,
+                    exit_price=trade.exit_price,
+                    pnl=trade.pnl,
+                    fees=trade.fees,
+                    exit_reason=trade.exit_reason,
+                    opened_at=trade.opened_at,
+                    closed_at=trade.closed_at,
+                )
+            )
+
+    def get_scanner_trades(self, limit: int | None = 200) -> list[ScannerTradeRecord]:
+        """Scanner-Trade-Historie, absteigend nach Schlusszeit."""
+        with self.session() as session:
+            stmt = select(ScannerTradeRecord).order_by(ScannerTradeRecord.closed_at.desc())
+            if limit is not None:
+                stmt = stmt.limit(limit)
+            return list(session.scalars(stmt).all())

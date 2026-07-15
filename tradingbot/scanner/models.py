@@ -149,3 +149,82 @@ class ScanCycleStats:
     failed_symbols: int
     duration_seconds: float
     finished_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass(slots=True)
+class ScannerPosition:
+    """Offene Paper-Trading-Position des Scanners (long-only, eine je Symbol).
+
+    Attributes:
+        symbol: Tickersymbol.
+        name: Anzeigename.
+        amount: Anzahl Aktien.
+        entry_price: Durchschnittlicher Einstiegspreis.
+        stop_loss: Aktueller Stop-Loss (wird nach Teilverkauf auf Einstand gezogen).
+        target_1: Erstes Kursziel (löst bei Erreichen einen Teilverkauf aus).
+        target_2: Zweites Kursziel (Exit der Restposition).
+        opened_at: Eröffnungszeitpunkt.
+        partial_exit_done: True, wenn Ziel 1 bereits realisiert wurde.
+        fees_paid: Bisher gezahlte Gebühren (Einstieg + evtl. Teilverkauf).
+        realized_pnl: Bereits realisierter PnL aus Teilverkäufen.
+    """
+
+    symbol: str
+    name: str
+    amount: float
+    entry_price: float
+    stop_loss: float
+    target_1: float
+    target_2: float
+    opened_at: datetime = field(default_factory=utc_now)
+    partial_exit_done: bool = False
+    fees_paid: float = 0.0
+    realized_pnl: float = 0.0
+
+    def unrealized_pnl(self, current_price: float) -> float:
+        """Unrealisierter Gewinn/Verlust zum aktuellen Kurs."""
+        return (current_price - self.entry_price) * self.amount
+
+
+@dataclass(slots=True)
+class ScannerTrade:
+    """Abgeschlossener (Teil-)Trade des Scanner-Paper-Depots.
+
+    Attributes:
+        symbol: Tickersymbol.
+        amount: Verkaufte Menge (kann eine Teilmenge der Position sein).
+        entry_price: Einstiegspreis.
+        exit_price: Ausstiegspreis.
+        pnl: Realisierter Gewinn/Verlust nach Gebühren.
+        fees: Gebühren dieses Fills.
+        exit_reason: ``target_1`` | ``target_2`` | ``stop_loss`` | ``invalidated``.
+        opened_at: Eröffnungszeitpunkt der (Ursprungs-)Position.
+        closed_at: Zeitpunkt dieses (Teil-)Exits.
+    """
+
+    symbol: str
+    amount: float
+    entry_price: float
+    exit_price: float
+    pnl: float
+    fees: float
+    exit_reason: str
+    opened_at: datetime
+    closed_at: datetime = field(default_factory=utc_now)
+
+    @property
+    def is_win(self) -> bool:
+        """True bei positivem PnL."""
+        return self.pnl > 0
+
+
+@dataclass(frozen=True, slots=True)
+class ScannerPortfolioSnapshot:
+    """Kennzahlen des Scanner-Paper-Depots für das Dashboard."""
+
+    cash: float
+    equity: float
+    open_positions: int
+    total_trades: int
+    win_rate: float
+    total_pnl: float

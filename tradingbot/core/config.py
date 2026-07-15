@@ -266,6 +266,8 @@ class ScannerNotificationEventsConfig(BaseModel):
     entry_signal: bool = True
     target_reached: bool = True
     invalidated: bool = True
+    trade_opened: bool = True
+    trade_closed: bool = True
 
 
 class ScannerNotificationsConfig(BaseModel):
@@ -287,6 +289,27 @@ class ScannerNotificationsConfig(BaseModel):
         return value
 
 
+class ScannerPaperTradingConfig(BaseModel):
+    """Paper-Trading-Parameter des Scanners (eigenes, vom Bot unabhängiges Depot).
+
+    Attributes:
+        enabled: Ob der Scanner selbst Paper-Trades ausführt.
+        initial_balance: Startkapital des Scanner-Depots (Quote-Währung: USD).
+        risk_per_trade: Kapitalanteil, der pro Trade riskiert wird (Stop-Distanz-basiert).
+        commission_rate: Kommission pro Fill als Bruchteil.
+        max_open_positions: Maximal gleichzeitig offene Positionen.
+        partial_exit_at_target1: Bei Erreichen von Ziel 1 die Hälfte verkaufen
+            und den Stop auf den Einstand ziehen, statt komplett zu schließen.
+    """
+
+    enabled: bool = True
+    initial_balance: float = Field(default=25_000.0, gt=0)
+    risk_per_trade: float = Field(default=0.02, gt=0, le=0.2)
+    commission_rate: float = Field(default=0.0005, ge=0, lt=0.05)
+    max_open_positions: int = Field(default=10, ge=1)
+    partial_exit_at_target1: bool = True
+
+
 class ScannerConfig(BaseModel):
     """Konfiguration des Buy-the-Dip-Marktscanners."""
 
@@ -302,6 +325,7 @@ class ScannerConfig(BaseModel):
     dashboard_port: int = Field(default=8502, ge=1, le=65535)
     filters: ScannerFilters = Field(default_factory=ScannerFilters)
     detector: ScannerDetectorSettings = Field(default_factory=ScannerDetectorSettings)
+    paper_trading: ScannerPaperTradingConfig = Field(default_factory=ScannerPaperTradingConfig)
     notifications: ScannerNotificationsConfig = Field(
         default_factory=ScannerNotificationsConfig
     )

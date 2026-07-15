@@ -32,6 +32,7 @@ from tradingbot.monitoring.notifier import (
 from tradingbot.scanner.data_provider import StockDataProvider, YFinanceProvider
 from tradingbot.scanner.detector import DetectorConfig, DipDetector
 from tradingbot.scanner.models import DipSignal, ScanCycleStats, SetupStatus
+from tradingbot.scanner.paper_trader import ScannerPaperTrader
 from tradingbot.scanner.universe import load_universe
 
 logger = get_logger(__name__)
@@ -105,6 +106,11 @@ class ScannerEngine:
         )
         self._detector = DipDetector(self._build_detector_config())
         self._notifier = ScannerNotifier(config.scanner)
+        self._paper_trader = (
+            ScannerPaperTrader(self._config.paper_trading, self._db)
+            if self._config.paper_trading.enabled
+            else None
+        )
         self._universe: dict[str, str] = {}
         self._running = False
         self._last_stats: ScanCycleStats | None = None
@@ -138,6 +144,11 @@ class ScannerEngine:
     def last_stats(self) -> ScanCycleStats | None:
         """Kennzahlen des letzten abgeschlossenen Zyklus."""
         return self._last_stats
+
+    @property
+    def paper_trader(self) -> ScannerPaperTrader | None:
+        """Das Paper-Trading-Depot, falls aktiviert (sonst None)."""
+        return self._paper_trader
 
     async def run_forever(self) -> None:
         """Startet die permanente Scan-Loop (bis zum Abbruch)."""
@@ -225,7 +236,28 @@ class ScannerEngine:
             chunk_signals = await asyncio.to_thread(self._detect_chunk, chunk, benchmark)
             signals.update(chunk_signals)
 
-        await self._reconcile(signals)
+        invalidated = await self._reconcile(signals)
+
+        if self._paper_trader is not None:
+            opened, closed = await asyncio.to_thread(
+                self._paper_trader.process_cycle, signals, data, invalidated
+            )
+            for position in opened:
+                await self._notifier.send(
+                    "trade_opened",
+                    f"💰 Paper-Kauf: {position.symbol}",
+                    f"{position.name}\n{position.amount:.2f} Stk @ {position.entry_price:.2f}\n"
+                    f"Stop: {position.stop_loss:.2f} | Ziel 1: {position.target_1:.2f} | "
+                    f"Ziel 2: {position.target_2:.2f}",
+                )
+            for trade in closed:
+                emoji = "✅" if trade.is_win else "❌"
+                await self._notifier.send(
+                    "trade_closed",
+                    f"{emoji} Paper-Trade geschlossen: {trade.symbol}",
+                    f"{trade.amount:.2f} Stk @ {trade.exit_price:.2f} ({trade.exit_reason})\n"
+                    f"PnL: {trade.pnl:+.2f}",
+                )
 
         duration = time.monotonic() - started
         stats = ScanCycleStats(
@@ -286,11 +318,17 @@ class ScannerEngine:
     # Statusübergänge & Persistenz
     # ------------------------------------------------------------------
 
-    async def _reconcile(self, current: dict[str, DipSignal]) -> None:
-        """Vergleicht mit dem Vorzyklus, persistiert und benachrichtigt."""
+    async def _reconcile(self, current: dict[str, DipSignal]) -> set[str]:
+        """Vergleicht mit dem Vorzyklus, persistiert und benachrichtigt.
+
+        Returns:
+            Symbole, deren Setup in diesem Zyklus ungültig wurde (für den
+            Paper-Trader – löst dort einen sofortigen Positions-Exit aus).
+        """
         previous = {
             r.symbol: r for r in self._db.get_scanner_signals(active_only=True)
         }
+        invalidated: set[str] = set()
 
         for symbol, signal in current.items():
             old = previous.get(symbol)
@@ -336,12 +374,14 @@ class ScannerEngine:
         for symbol, old in previous.items():
             if symbol not in current:
                 self._db.mark_scanner_signal_status(symbol, SetupStatus.INVALIDATED.value)
+                invalidated.add(symbol)
                 await self._notifier.send(
                     "invalidated",
                     f"❌ Setup ungültig: {symbol}",
                     f"{old.name}\nLetzter Score: {old.score:.0f}\n"
                     f"Unterstützung {old.support_level:.2f} gebrochen oder Trendkriterien verletzt.",
                 )
+        return invalidated
 
     @staticmethod
     def _describe(signal: DipSignal) -> str:

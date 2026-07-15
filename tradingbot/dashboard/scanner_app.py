@@ -73,6 +73,96 @@ def _fetch_chart_data(symbol: str, period: str = "1y") -> pd.DataFrame:
     return df[["open", "high", "low", "close", "volume"]].dropna()
 
 
+def _paper_trading_kpi_row(db: Database, config: Config) -> None:
+    """Kennzahlen-Zeile des Scanner-Paper-Depots."""
+    if not config.scanner.paper_trading.enabled:
+        return
+    positions = db.get_scanner_positions()
+    trades = db.get_scanner_trades(limit=None)
+    cash = db.get_scanner_cash(default=config.scanner.paper_trading.initial_balance)
+    book_value = sum(p.amount * p.entry_price for p in positions)
+    equity = cash + book_value
+    wins = sum(1 for t in trades if t.pnl > 0)
+    total_pnl = sum(t.pnl for t in trades)
+
+    st.subheader("💰 Paper-Trading-Depot")
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric(
+        "Equity", f"${equity:,.0f}",
+        f"{(equity / config.scanner.paper_trading.initial_balance - 1):+.1%}",
+    )
+    col2.metric("Bargeld", f"${cash:,.0f}")
+    col3.metric("Offene Positionen", len(positions))
+    col4.metric("Abgeschlossene Trades", len(trades), f"{wins}/{len(trades)} Gewinner" if trades else None)
+    col5.metric("Gesamt-PnL", f"${total_pnl:+,.0f}")
+
+
+def _paper_trading_section(db: Database, config: Config) -> None:
+    """Offene Positionen und Trade-Historie des Scanner-Depots."""
+    if not config.scanner.paper_trading.enabled:
+        st.info("Paper-Trading ist deaktiviert (scanner.paper_trading.enabled: false).")
+        return
+
+    st.subheader("Offene Positionen")
+    positions = db.get_scanner_positions()
+    if not positions:
+        st.info("Keine offenen Paper-Positionen.")
+    else:
+        rows = [
+            {
+                "Symbol": p.symbol,
+                "Name": p.name,
+                "Menge": p.amount,
+                "Einstieg": p.entry_price,
+                "Stop": p.stop_loss,
+                "Ziel 1": p.target_1,
+                "Ziel 2": p.target_2,
+                "Teilverkauf erfolgt": "Ja" if p.partial_exit_done else "Nein",
+                "Eröffnet": pd.Timestamp(p.opened_at).strftime("%d.%m. %H:%M"),
+            }
+            for p in positions
+        ]
+        st.dataframe(
+            pd.DataFrame(rows), use_container_width=True, hide_index=True,
+            column_config={
+                "Einstieg": st.column_config.NumberColumn(format="%.2f"),
+                "Stop": st.column_config.NumberColumn(format="%.2f"),
+                "Ziel 1": st.column_config.NumberColumn(format="%.2f"),
+                "Ziel 2": st.column_config.NumberColumn(format="%.2f"),
+                "Menge": st.column_config.NumberColumn(format="%.2f"),
+            },
+        )
+
+    st.subheader("Trade-Historie")
+    trades = db.get_scanner_trades(limit=100)
+    if not trades:
+        st.info("Noch keine abgeschlossenen Paper-Trades.")
+        return
+    rows = [
+        {
+            "Symbol": t.symbol,
+            "Menge": t.amount,
+            "Einstieg": t.entry_price,
+            "Ausstieg": t.exit_price,
+            "PnL": t.pnl,
+            "Gebühren": t.fees,
+            "Grund": t.exit_reason,
+            "Geschlossen": pd.Timestamp(t.closed_at).strftime("%d.%m. %H:%M"),
+        }
+        for t in trades
+    ]
+    df = pd.DataFrame(rows)
+    st.dataframe(
+        df.style.map(
+            lambda v: "color: #00cc96" if isinstance(v, float) and v > 0 else (
+                "color: #ef553b" if isinstance(v, float) and v < 0 else ""
+            ),
+            subset=["PnL"],
+        ),
+        use_container_width=True, hide_index=True, height=360,
+    )
+
+
 def _kpi_header(db: Database, config: Config) -> None:
     """Kennzahlen-Kopfzeile: Universum, Signale, letzter Scan."""
     status = db.get_scanner_status()
@@ -262,11 +352,17 @@ def main() -> None:
 
     _kpi_header(db, config)
     st.divider()
+    _paper_trading_kpi_row(db, config)
+    st.divider()
 
-    selected = _ranking_table(db, config)
-    if selected:
-        st.divider()
-        _detail_chart(db, selected)
+    tab_signals, tab_paper = st.tabs(["📈 Setups & Chart", "💰 Paper-Trading"])
+    with tab_signals:
+        selected = _ranking_table(db, config)
+        if selected:
+            st.divider()
+            _detail_chart(db, selected)
+    with tab_paper:
+        _paper_trading_section(db, config)
 
     if auto:
         time.sleep(interval)

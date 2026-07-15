@@ -119,6 +119,42 @@ scanner:
       invalidated: true      # Setup ungültig geworden
 ```
 
+## Paper-Trading (eigenes Depot)
+
+Der Scanner kann optional selbst automatisiert Paper-Trades ausführen –
+vollständig getrennt vom Kapital/Positionen des Trading-Bots (eigene
+Datenbanktabellen `scanner_portfolio`, `scanner_positions`,
+`scanner_trades`, eigenes Startkapital).
+
+```yaml
+scanner:
+  paper_trading:
+    enabled: true
+    initial_balance: 25000.0
+    risk_per_trade: 0.02       # 2% Kapitalrisiko je Trade (Stop-Distanz-basiert)
+    commission_rate: 0.0005
+    max_open_positions: 10
+    partial_exit_at_target1: true
+```
+
+**Logik je Zyklus** (Exits vor Einstiegen):
+
+1. **Einstieg**: Sobald ein Setup den Status `entry` erreicht und noch
+   keine Position im Symbol besteht (Positionslimit und Kapital
+   vorausgesetzt). Positionsgröße = (`risk_per_trade` × Depot-Equity) /
+   (Einstieg − Stop) – wie beim Bot-Sizing.
+2. **Teilverkauf bei Ziel 1** (falls `partial_exit_at_target1: true`):
+   verkauft die Hälfte, zieht den Stop auf den Einstand.
+3. **Exit bei Ziel 2**: schließt die Restposition.
+4. **Exit bei Stop-Loss**: schließt die (Rest-)Position sofort.
+5. **Sofort-Exit bei Ungültigwerden**: wenn ein Setup als `invalidated`
+   markiert wird, wird eine offene Position umgehend zum aktuellen
+   Kurs geschlossen – unabhängig von Stop/Ziel.
+
+Mehrere Kandidaten mit `entry`-Status werden nach Score priorisiert;
+das Positionslimit (`max_open_positions`) begrenzt gleichzeitige
+Positionen.
+
 ## Dashboard
 
 `python main.py scanner-dashboard` (Port 8502) zeigt:
@@ -131,6 +167,8 @@ scanner:
 * Detail-Chart je Setup: Candlesticks, EMA20/50/200, Unterstützungs-,
   Einstiegs-, Stop- und Ziellinien, Bezugshoch, gefärbtes Volumen
 * Score-Aufschlüsselung nach Komponenten
+* Eigener Tab „Paper-Trading": Depot-Equity, Bargeld, offene
+  Positionen, Trade-Historie mit PnL
 
 Das Dashboard liest ausschließlich aus der Datenbank – Scanner und
 Dashboard laufen als getrennte Prozesse und können unabhängig

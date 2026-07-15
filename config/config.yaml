@@ -161,12 +161,11 @@ scanner:
   universes: ["sp500", "nasdaq_100", "dow_jones", "eu_large"]
   custom_tickers: []          # zusaetzliche Einzelticker
   # universe_csv: "config/russell2000.csv"   # optionale CSV (Spalte: symbol)
-  interval_seconds: 60        # Scan-Zyklus (technisches Minimum; ein voller
-                               # Durchlauf ueber ~550 Symbole dauert selbst
-                               # ~70s, realer Zyklus daher eher ~90-130s)
+  interval_seconds: 300        # Scan-Zyklus (5 Minuten; schont Yahoo-Finance-
+                                # Rate-Limits bei ~550 Symbolen dauerhaft)
   history_period: "1y"        # Kurshistorie je Symbol
   batch_size: 100             # Ticker pro Download-Request
-  cache_ttl_seconds: 45       # kurz halten, damit Minutenupdates ankommen
+  cache_ttl_seconds: 240      # kuerzer als das Intervall, damit jeder Zyklus frisch ist
   benchmark_symbol: "SPY"     # Benchmark fuer relative Staerke
   dashboard_port: 8502
 
@@ -194,6 +193,17 @@ scanner:
     min_trend_score: 0.6
     rs_lookback: 63
 
+  paper_trading:
+    # Eigenes, vom Bot unabhaengiges Paper-Depot: kauft automatisch bei
+    # ENTRY-Status, verkauft Haelfte bei Ziel 1 (Stop auf Einstand), Rest
+    # bei Ziel 2 oder Stop. Kein echtes Geld, nur Simulation.
+    enabled: true
+    initial_balance: 25000.0
+    risk_per_trade: 0.02       # 2% Kapitalrisiko je Trade (Stop-Distanz-basiert)
+    commission_rate: 0.0005
+    max_open_positions: 10
+    partial_exit_at_target1: true
+
   notifications:
     enabled: false
     channels: []              # discord | telegram | email
@@ -203,3 +213,5 @@ scanner:
       entry_signal: true
       target_reached: true
       invalidated: true
+      trade_opened: true
+      trade_closed: true
