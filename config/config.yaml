@@ -161,10 +161,12 @@ scanner:
   universes: ["sp500", "nasdaq_100", "dow_jones", "eu_large"]
   custom_tickers: []          # zusaetzliche Einzelticker
   # universe_csv: "config/russell2000.csv"   # optionale CSV (Spalte: symbol)
-  interval_seconds: 900       # Scan-Zyklus (15 Minuten)
+  interval_seconds: 60        # Scan-Zyklus (technisches Minimum; ein voller
+                               # Durchlauf ueber ~550 Symbole dauert selbst
+                               # ~70s, realer Zyklus daher eher ~90-130s)
   history_period: "1y"        # Kurshistorie je Symbol
   batch_size: 100             # Ticker pro Download-Request
-  cache_ttl_seconds: 600
+  cache_ttl_seconds: 45       # kurz halten, damit Minutenupdates ankommen
   benchmark_symbol: "SPY"     # Benchmark fuer relative Staerke
   dashboard_port: 8502
 
