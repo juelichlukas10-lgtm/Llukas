@@ -8,6 +8,7 @@ konfigurierte SQLAlchemy-URL.
 from __future__ import annotations
 
 import traceback as tb_module
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -49,16 +50,50 @@ class Database:
         echo: SQL-Statements loggen (Debugging).
     """
 
-    def __init__(self, url: str = "sqlite:///storage/tradingbot.db", echo: bool = False) -> None:
+    def __init__(
+        self,
+        url: str = "sqlite:///storage/tradingbot.db",
+        echo: bool = False,
+        connect_retries: int = 3,
+    ) -> None:
         if url.startswith("sqlite:///"):
             db_path = Path(url.removeprefix("sqlite:///"))
             if db_path.parent != Path("."):
                 db_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            self._engine: Engine = create_engine(url, echo=echo, future=True)
-            Base.metadata.create_all(self._engine)
-        except Exception as exc:
-            raise DatabaseError(f"Datenbank-Initialisierung fehlgeschlagen ({url}): {exc}") from exc
+
+        # pool_pre_ping: prueft jede Verbindung vor Gebrauch und ersetzt tote
+        # Verbindungen transparent (schuetzt vor Servern, die Verbindungen nach
+        # Inaktivitaet kappen, z. B. Neon-Autosuspend).
+        # pool_recycle: verwirft Verbindungen vorsorglich nach 280s, bevor
+        # typische Idle-Timeouts serverlos gehosteter Postgres-Instanzen greifen.
+        engine_kwargs: dict[str, Any] = {"echo": echo, "future": True, "pool_pre_ping": True}
+        if not url.startswith("sqlite"):
+            engine_kwargs["pool_recycle"] = 280
+
+        last_error: Exception | None = None
+        for attempt in range(1, connect_retries + 1):
+            try:
+                self._engine: Engine = create_engine(url, **engine_kwargs)
+                Base.metadata.create_all(self._engine)
+                last_error = None
+                break
+            except Exception as exc:
+                last_error = exc
+                self._engine = None  # type: ignore[assignment]
+                if attempt < connect_retries:
+                    delay = 2.0 * attempt
+                    logger.warning(
+                        "Datenbankverbindung fehlgeschlagen (Versuch %d/%d): %s – "
+                        "neuer Versuch in %.0fs (z. B. serverlose DB wacht gerade auf)",
+                        attempt, connect_retries, exc, delay,
+                    )
+                    time.sleep(delay)
+        if last_error is not None:
+            raise DatabaseError(
+                f"Datenbank-Initialisierung fehlgeschlagen nach {connect_retries} Versuchen "
+                f"({url}): {last_error}"
+            ) from last_error
+
         self._session_factory = sessionmaker(bind=self._engine, expire_on_commit=False)
         logger.info("Datenbank verbunden: %s", url.split("@")[-1])
 
