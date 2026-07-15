@@ -109,6 +109,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("list-strategies", help="Verfügbare Strategien anzeigen")
     sub.add_parser("dashboard", help="Streamlit-Dashboard starten")
+
+    p_scan = sub.add_parser("scan", help="Buy-the-Dip-Marktscanner starten (permanent)")
+    p_scan.add_argument(
+        "--once", action="store_true", help="Nur einen Scan-Durchlauf ausführen und beenden"
+    )
+    sub.add_parser("scanner-dashboard", help="Scanner-Dashboard starten")
     return parser
 
 
@@ -388,6 +394,49 @@ def _cmd_dashboard(config: Config, config_path: str) -> int:
     return subprocess.call(cmd)
 
 
+def _cmd_scan(config: Config, args: argparse.Namespace) -> int:
+    """Startet den Buy-the-Dip-Scanner (permanent oder einmalig)."""
+    from tradingbot.scanner.engine import ScannerEngine
+
+    if not config.scanner.enabled:
+        print("Scanner ist deaktiviert (scanner.enabled: false in der Konfiguration).")
+        return 1
+
+    engine = ScannerEngine(config)
+
+    async def _run() -> None:
+        if args.once:
+            stats = await engine.scan_once()
+            print(
+                f"Scan abgeschlossen: {stats.scanned_symbols} Symbole analysiert, "
+                f"{stats.signals_found} Setups gefunden, "
+                f"{stats.failed_symbols} ohne Daten ({stats.duration_seconds:.1f}s)"
+            )
+        else:
+            await engine.run_forever()
+
+    try:
+        asyncio.run(_run())
+    except KeyboardInterrupt:
+        logger.info("Scanner durch Benutzer beendet (Strg+C)")
+    return 0
+
+
+def _cmd_scanner_dashboard(config: Config, config_path: str) -> int:
+    """Startet das separate Scanner-Dashboard."""
+    import subprocess
+
+    app_path = Path(__file__).parent / "dashboard" / "scanner_app.py"
+    cmd = [
+        sys.executable, "-m", "streamlit", "run", str(app_path),
+        "--server.port", str(config.scanner.dashboard_port),
+        "--server.address", config.dashboard.host,
+        "--", "--config", config_path,
+    ]
+    logger.info("Starte Scanner-Dashboard: %s", " ".join(cmd))
+    return subprocess.call(cmd)
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI-Einstiegspunkt.
 
@@ -418,6 +467,10 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_list_strategies(config)
         case "dashboard":
             return _cmd_dashboard(config, args.config)
+        case "scan":
+            return _cmd_scan(config, args)
+        case "scanner-dashboard":
+            return _cmd_scanner_dashboard(config, args.config)
     parser.error(f"Unbekanntes Kommando: {args.command}")
     return 2
 

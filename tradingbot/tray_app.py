@@ -29,6 +29,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PYTHON = sys.executable
 DASHBOARD_PORT = 8501
 DASHBOARD_URL = f"http://localhost:{DASHBOARD_PORT}"
+SCANNER_DASHBOARD_PORT = 8502
 
 #: Beliebiger, unkritischer lokaler Port – dient nur als Instanz-Sperre.
 _LOCK_PORT = 47932
@@ -66,6 +67,8 @@ class TradingBotTray:
     def __init__(self) -> None:
         self.bot_process: subprocess.Popen | None = None
         self.dashboard_process: subprocess.Popen | None = None
+        self.scanner_process: subprocess.Popen | None = None
+        self.scanner_dashboard_process: subprocess.Popen | None = None
         self._stopping = False
         self.icon = pystray.Icon(
             "tradingbot",
@@ -99,6 +102,16 @@ class TradingBotTray:
             pystray.MenuItem(
                 "Bot stoppen", self.stop_bot, enabled=lambda item: self.bot_process is not None
             ),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem(
+                "Scanner starten", self.start_scanner,
+                enabled=lambda item: self.scanner_process is None,
+            ),
+            pystray.MenuItem(
+                "Scanner stoppen", self.stop_scanner,
+                enabled=lambda item: self.scanner_process is not None,
+            ),
+            pystray.MenuItem("Scanner-Dashboard öffnen", self.open_scanner_dashboard),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Logs-Ordner öffnen", self.open_logs),
             pystray.MenuItem("Projektordner öffnen", self.open_project_folder),
@@ -142,6 +155,57 @@ class TradingBotTray:
             self._notify("Bot wurde unerwartet beendet – siehe logs/tradingbot.log")
 
     # ------------------------------------------------------------------
+    # Scanner-Prozess (Buy-the-Dip-Marktscanner, unabhängig vom Bot)
+    # ------------------------------------------------------------------
+
+    def start_scanner(
+        self, icon: pystray.Icon | None = None, item: pystray.MenuItem | None = None
+    ) -> None:
+        """Startet den Marktscanner (``main.py scan``) im Hintergrund."""
+        if self.scanner_process is not None:
+            return
+        self.scanner_process = subprocess.Popen([PYTHON, "main.py", "scan"], **_POPEN_KWARGS)
+        self.icon.update_menu()
+        self._notify("Buy-the-Dip-Scanner gestartet")
+        threading.Thread(
+            target=self._watch_scanner, args=(self.scanner_process,), daemon=True
+        ).start()
+
+    def stop_scanner(
+        self, icon: pystray.Icon | None = None, item: pystray.MenuItem | None = None
+    ) -> None:
+        """Beendet den Scanner-Prozess geordnet."""
+        if self.scanner_process is None:
+            return
+        self._terminate(self.scanner_process)
+        self.scanner_process = None
+        self.icon.update_menu()
+        self._notify("Scanner gestoppt")
+
+    def _watch_scanner(self, process: subprocess.Popen) -> None:
+        """Meldet einen unerwarteten Absturz des Scanner-Prozesses."""
+        process.wait()
+        if not self._stopping and self.scanner_process is process:
+            self.scanner_process = None
+            self.icon.update_menu()
+            self._notify("Scanner wurde unerwartet beendet – siehe logs/tradingbot.log")
+
+    def open_scanner_dashboard(
+        self, icon: pystray.Icon | None = None, item: pystray.MenuItem | None = None
+    ) -> None:
+        """Startet das Scanner-Dashboard bei Bedarf und öffnet es im Browser."""
+        if self.scanner_dashboard_process is None or self.scanner_dashboard_process.poll() is not None:
+            self.scanner_dashboard_process = subprocess.Popen(
+                [
+                    PYTHON, "-m", "streamlit", "run", "tradingbot/dashboard/scanner_app.py",
+                    "--server.headless", "true", "--server.port", str(SCANNER_DASHBOARD_PORT),
+                ],
+                **_POPEN_KWARGS,
+            )
+            time.sleep(3)
+        webbrowser.open(f"http://localhost:{SCANNER_DASHBOARD_PORT}")
+
+    # ------------------------------------------------------------------
     # Dashboard-Prozess (lazy: startet erst bei Bedarf)
     # ------------------------------------------------------------------
 
@@ -173,12 +237,15 @@ class TradingBotTray:
         subprocess.Popen(["explorer", str(PROJECT_ROOT)])
 
     def quit_app(self, icon: pystray.Icon | None = None, item: pystray.MenuItem | None = None) -> None:
-        """Beendet Bot, Dashboard und die Tray-App selbst."""
+        """Beendet Bot, Scanner, Dashboards und die Tray-App selbst."""
         self._stopping = True
         self.stop_bot()
-        if self.dashboard_process is not None:
-            self._terminate(self.dashboard_process)
-            self.dashboard_process = None
+        self.stop_scanner()
+        for attr in ("dashboard_process", "scanner_dashboard_process"):
+            process = getattr(self, attr)
+            if process is not None:
+                self._terminate(process)
+                setattr(self, attr, None)
         self.icon.stop()
 
     def _notify(self, message: str) -> None:

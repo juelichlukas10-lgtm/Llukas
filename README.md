@@ -38,7 +38,11 @@ Streamlit-Dashboard.
 - **Dashboard:** Streamlit mit Live-Kennzahlen, Candlestick-Charts,
   Equity-Kurve, PnL-Heatmap, Positionen, Backtests und Logs
 - **Benachrichtigungen:** Discord, Telegram, E-Mail
-- **210 Tests** (Unit + Integration), strukturiertes Logging mit Rotation
+- **Buy-the-Dip-Aktienscanner:** eigenständiges Modul mit eigenem Dashboard –
+  überwacht permanent hunderte Aktien (S&P 500, Nasdaq 100, Dow, EU) und
+  erkennt Rücksetzer in intakten Aufwärtstrends mit Score 0–100
+  (siehe [docs/scanner.md](docs/scanner.md))
+- **233 Tests** (Unit + Integration), strukturiertes Logging mit Rotation
 
 ## Schnellstart
 
@@ -84,6 +88,8 @@ Entfernen: `powershell -File scripts\uninstall_autostart.ps1`
 python main.py run                  # Bot starten (Paper-Modus als Standard)
 python main.py list-strategies     # Alle 18 Strategien anzeigen
 python main.py dashboard           # Streamlit-Dashboard starten
+python main.py scan                # Buy-the-Dip-Aktienscanner starten
+python main.py scanner-dashboard  # Scanner-Dashboard (Port 8502)
 
 # Historische Daten laden
 python main.py download --symbol BTC/USDT --timeframe 1h --start 2023-01-01
@@ -119,7 +125,8 @@ tradingbot/
 ├── backtesting/   Backtest-Engine und Optimierer (Grid/Random/Walk-Forward)
 ├── analytics/     Indikatoren und Performance-Kennzahlen
 ├── monitoring/    Benachrichtigungen (Discord/Telegram/E-Mail)
-└── dashboard/     Streamlit-App
+├── scanner/       Buy-the-Dip-Aktienscanner (eigenständiges Modul)
+└── dashboard/     Streamlit-Apps (Bot-Dashboard + Scanner-Dashboard)
 config/            YAML-Konfiguration
 tests/             Unit- und Integrationstests (pytest)
 docs/              Ausführliche Dokumentation
@@ -178,6 +185,7 @@ docker compose --profile postgres up -d   # optional mit PostgreSQL
 | [docs/configuration.md](docs/configuration.md) | Alle Konfigurationsoptionen |
 | [docs/strategies.md](docs/strategies.md) | Strategien und Plugin-System |
 | [docs/backtesting.md](docs/backtesting.md) | Backtesting und Optimierung |
+| [docs/scanner.md](docs/scanner.md) | Buy-the-Dip-Aktienscanner |
 | [docs/deployment.md](docs/deployment.md) | Docker, Server-Betrieb |
 | [docs/faq.md](docs/faq.md) | Häufige Fragen |
 

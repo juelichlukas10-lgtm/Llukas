@@ -11,7 +11,10 @@ import traceback as tb_module
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import TYPE_CHECKING, Any, Iterator
+
+if TYPE_CHECKING:
+    from tradingbot.scanner.models import DipSignal
 
 from sqlalchemy import create_engine, delete, select
 from sqlalchemy.engine import Engine
@@ -28,6 +31,8 @@ from tradingbot.database.models import (
     OrderRecord,
     PerformanceRecord,
     PositionRecord,
+    ScannerSignalRecord,
+    ScannerStatusRecord,
     StrategyRecord,
     TradeRecord,
 )
@@ -353,3 +358,108 @@ class Database:
             if strategy is not None:
                 stmt = stmt.where(BacktestRecord.strategy == strategy)
             return list(session.scalars(stmt).all())
+
+    # ------------------------------------------------------------------
+    # Marktscanner
+    # ------------------------------------------------------------------
+
+    def upsert_scanner_signal(self, signal: "DipSignal") -> None:  # noqa: F821
+        """Speichert/aktualisiert ein Scanner-Signal (Schlüssel: Symbol).
+
+        Der Ersterkennungs-Zeitpunkt (``detected_at``) eines bereits
+        vorhandenen Signals bleibt erhalten.
+        """
+        with self.session() as session:
+            existing = session.get(ScannerSignalRecord, signal.symbol)
+            detected_at = existing.detected_at if existing is not None else signal.detected_at
+            session.merge(
+                ScannerSignalRecord(
+                    symbol=signal.symbol,
+                    name=signal.name,
+                    status=signal.status.value,
+                    score=signal.score,
+                    price=signal.price,
+                    change_pct=signal.change_pct,
+                    recent_high=signal.recent_high,
+                    drawdown_pct=signal.drawdown_pct,
+                    support_type=signal.support_type.value,
+                    support_level=signal.support_level,
+                    support_distance_pct=signal.support_distance_pct,
+                    trend_strength=signal.trend_strength,
+                    rsi=signal.rsi,
+                    volume=signal.volume,
+                    volume_ratio=signal.volume_ratio,
+                    relative_strength=signal.relative_strength,
+                    atr=signal.atr,
+                    entry_price=signal.entry_price,
+                    stop_loss=signal.stop_loss,
+                    target_1=signal.target_1,
+                    target_2=signal.target_2,
+                    risk_reward=signal.risk_reward,
+                    score_breakdown=signal.score_breakdown,
+                    detected_at=detected_at,
+                    updated_at=signal.updated_at,
+                )
+            )
+
+    def mark_scanner_signal_status(self, symbol: str, status: str) -> None:
+        """Setzt nur den Status eines Signals (z. B. ``invalidated``)."""
+        with self.session() as session:
+            record = session.get(ScannerSignalRecord, symbol)
+            if record is not None:
+                record.status = status
+                record.updated_at = datetime.now(timezone.utc)
+
+    def get_scanner_signals(
+        self,
+        active_only: bool = True,
+        min_score: float = 0.0,
+        limit: int | None = None,
+    ) -> list[ScannerSignalRecord]:
+        """Scanner-Signale, absteigend nach Score sortiert."""
+        active_statuses = ("watching", "confirmed", "entry")
+        with self.session() as session:
+            stmt = select(ScannerSignalRecord).order_by(ScannerSignalRecord.score.desc())
+            if active_only:
+                stmt = stmt.where(ScannerSignalRecord.status.in_(active_statuses))
+            if min_score > 0:
+                stmt = stmt.where(ScannerSignalRecord.score >= min_score)
+            if limit is not None:
+                stmt = stmt.limit(limit)
+            return list(session.scalars(stmt).all())
+
+    def delete_scanner_signal(self, symbol: str) -> None:
+        """Entfernt ein Signal endgültig."""
+        with self.session() as session:
+            session.execute(
+                delete(ScannerSignalRecord).where(ScannerSignalRecord.symbol == symbol)
+            )
+
+    def save_scanner_status(
+        self,
+        universe_size: int,
+        scanned_symbols: int,
+        signals_found: int,
+        failed_symbols: int,
+        duration_seconds: float,
+        running: bool,
+    ) -> None:
+        """Aktualisiert die Metadaten des letzten Scan-Durchlaufs (Einzelzeile)."""
+        with self.session() as session:
+            session.merge(
+                ScannerStatusRecord(
+                    id=1,
+                    last_scan_at=datetime.now(timezone.utc),
+                    universe_size=universe_size,
+                    scanned_symbols=scanned_symbols,
+                    signals_found=signals_found,
+                    failed_symbols=failed_symbols,
+                    duration_seconds=duration_seconds,
+                    running=1 if running else 0,
+                )
+            )
+
+    def get_scanner_status(self) -> ScannerStatusRecord | None:
+        """Metadaten des letzten Scan-Durchlaufs oder None."""
+        with self.session() as session:
+            return session.get(ScannerStatusRecord, 1)

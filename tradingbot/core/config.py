@@ -220,6 +220,93 @@ class BacktestConfig(BaseModel):
     leverage: float = Field(default=1.0, ge=1.0)
 
 
+class ScannerDetectorSettings(BaseModel):
+    """Parameter der Buy-the-Dip-Mustererkennung."""
+
+    min_history: int = Field(default=120, ge=60)
+    trend_lookback: int = Field(default=120, ge=40)
+    min_trend_gain: float = Field(default=0.10, ge=0.0, le=2.0)
+    high_lookback: int = Field(default=60, ge=10)
+    min_dip: float = Field(default=0.03, gt=0, lt=0.5)
+    max_dip: float = Field(default=0.20, gt=0, lt=0.9)
+    min_dip_bars: int = Field(default=2, ge=1)
+    max_dip_bars: int = Field(default=30, ge=2)
+    panic_atr_mult: float = Field(default=2.5, gt=0)
+    volume_spike_limit: float = Field(default=2.25, gt=1.0)
+    support_max_distance: float = Field(default=0.04, gt=0, le=0.2)
+    support_undercut_tolerance: float = Field(default=0.015, ge=0, le=0.1)
+    invalidation_pct: float = Field(default=0.03, gt=0, le=0.2)
+    stop_atr_mult: float = Field(default=0.5, ge=0)
+    min_trend_score: float = Field(default=0.6, ge=0, le=1.0)
+    rs_lookback: int = Field(default=63, ge=20)
+
+    @model_validator(mode="after")
+    def _dip_bounds(self) -> "ScannerDetectorSettings":
+        if self.min_dip >= self.max_dip:
+            raise ValueError("scanner.detector: min_dip muss kleiner als max_dip sein")
+        if self.min_dip_bars >= self.max_dip_bars:
+            raise ValueError("scanner.detector: min_dip_bars muss kleiner als max_dip_bars sein")
+        return self
+
+
+class ScannerFilters(BaseModel):
+    """Vorfilter des Scan-Universums."""
+
+    min_price: float = Field(default=5.0, ge=0)
+    max_price: float = Field(default=0.0, ge=0, description="0 = unbegrenzt")
+    min_avg_volume: float = Field(default=300_000.0, ge=0)
+    min_score: float = Field(default=50.0, ge=0, le=100)
+
+
+class ScannerNotificationEventsConfig(BaseModel):
+    """Welche Scanner-Ereignisse Benachrichtigungen auslösen."""
+
+    new_setup: bool = True
+    confirmed: bool = True
+    entry_signal: bool = True
+    target_reached: bool = True
+    invalidated: bool = True
+
+
+class ScannerNotificationsConfig(BaseModel):
+    """Benachrichtigungen des Scanners (unabhängig vom Bot)."""
+
+    enabled: bool = False
+    channels: list[str] = Field(default_factory=list)
+    events: ScannerNotificationEventsConfig = Field(
+        default_factory=ScannerNotificationEventsConfig
+    )
+
+    @field_validator("channels")
+    @classmethod
+    def _valid_channels(cls, value: list[str]) -> list[str]:
+        allowed = {"discord", "telegram", "email"}
+        for channel in value:
+            if channel not in allowed:
+                raise ValueError(f"Unbekannter Kanal '{channel}'. Erlaubt: {sorted(allowed)}")
+        return value
+
+
+class ScannerConfig(BaseModel):
+    """Konfiguration des Buy-the-Dip-Marktscanners."""
+
+    enabled: bool = True
+    universes: list[str] = Field(default_factory=lambda: ["sp500", "nasdaq_100"])
+    custom_tickers: list[str] = Field(default_factory=list)
+    universe_csv: Path | None = None
+    interval_seconds: float = Field(default=900.0, ge=60.0)
+    history_period: str = "1y"
+    batch_size: int = Field(default=100, ge=10, le=500)
+    cache_ttl_seconds: float = Field(default=600.0, ge=0)
+    benchmark_symbol: str = "SPY"
+    dashboard_port: int = Field(default=8502, ge=1, le=65535)
+    filters: ScannerFilters = Field(default_factory=ScannerFilters)
+    detector: ScannerDetectorSettings = Field(default_factory=ScannerDetectorSettings)
+    notifications: ScannerNotificationsConfig = Field(
+        default_factory=ScannerNotificationsConfig
+    )
+
+
 class Config(BaseModel):
     """Vollständige, validierte Bot-Konfiguration."""
 
@@ -236,6 +323,7 @@ class Config(BaseModel):
     notifications: NotificationsConfig = Field(default_factory=NotificationsConfig)
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
     backtest: BacktestConfig = Field(default_factory=BacktestConfig)
+    scanner: ScannerConfig = Field(default_factory=ScannerConfig)
 
     def exchange_settings(self, exchange: str) -> ExchangeSettings:
         """Einstellungen einer Börse; liefert Defaults für unbekannte Börsen."""

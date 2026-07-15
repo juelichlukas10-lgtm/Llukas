@@ -153,3 +153,51 @@ backtest:
   slippage_rate: 0.0005
   spread_rate: 0.0002
   leverage: 1.0
+
+scanner:
+  # Buy-the-Dip-Marktscanner (eigenstaendiges Modul, unabhaengig vom Bot).
+  # Start: python main.py scan | Dashboard: python main.py scanner-dashboard
+  enabled: true
+  universes: ["sp500", "nasdaq_100", "dow_jones", "eu_large"]
+  custom_tickers: []          # zusaetzliche Einzelticker
+  # universe_csv: "config/russell2000.csv"   # optionale CSV (Spalte: symbol)
+  interval_seconds: 900       # Scan-Zyklus (15 Minuten)
+  history_period: "1y"        # Kurshistorie je Symbol
+  batch_size: 100             # Ticker pro Download-Request
+  cache_ttl_seconds: 600
+  benchmark_symbol: "SPY"     # Benchmark fuer relative Staerke
+  dashboard_port: 8502
+
+  filters:
+    min_price: 5.0            # Pennystocks ausschliessen
+    max_price: 0.0            # 0 = unbegrenzt
+    min_avg_volume: 300000    # Mindest-Durchschnittsvolumen (Liquiditaet)
+    min_score: 50.0           # nur Setups ab diesem Score anzeigen/speichern
+
+  detector:
+    min_history: 120
+    trend_lookback: 120
+    min_trend_gain: 0.10      # Trend muss >= 10% Anstieg gebracht haben
+    high_lookback: 60
+    min_dip: 0.03             # Ruecksetzer mindestens 3% ...
+    max_dip: 0.20             # ... hoechstens 20% vom Hoch
+    min_dip_bars: 2
+    max_dip_bars: 30
+    panic_atr_mult: 2.5       # Tagesverlust > 2.5x ATR = panikartig
+    volume_spike_limit: 2.25
+    support_max_distance: 0.04
+    support_undercut_tolerance: 0.015
+    invalidation_pct: 0.03
+    stop_atr_mult: 0.5
+    min_trend_score: 0.6
+    rs_lookback: 63
+
+  notifications:
+    enabled: false
+    channels: []              # discord | telegram | email
+    events:
+      new_setup: true
+      confirmed: true
+      entry_signal: true
+      target_reached: true
+      invalidated: true

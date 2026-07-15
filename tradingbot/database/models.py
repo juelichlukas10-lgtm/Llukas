@@ -126,6 +126,57 @@ class ErrorLogRecord(Base):
     traceback: Mapped[str] = mapped_column(Text, default="")
 
 
+class ScannerSignalRecord(Base):
+    """Aktuelles Buy-the-Dip-Setup des Marktscanners (ein Datensatz je Symbol)."""
+
+    __tablename__ = "scanner_signals"
+    __table_args__ = (
+        Index("ix_scanner_signals_score", "score"),
+        Index("ix_scanner_signals_status", "status"),
+    )
+
+    symbol: Mapped[str] = mapped_column(String(24), primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), default="")
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    score: Mapped[float] = mapped_column(Float, nullable=False)
+    price: Mapped[float] = mapped_column(Float, nullable=False)
+    change_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    recent_high: Mapped[float] = mapped_column(Float, default=0.0)
+    drawdown_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    support_type: Mapped[str] = mapped_column(String(20), default="")
+    support_level: Mapped[float] = mapped_column(Float, default=0.0)
+    support_distance_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    trend_strength: Mapped[float] = mapped_column(Float, default=0.0)
+    rsi: Mapped[float] = mapped_column(Float, default=0.0)
+    volume: Mapped[float] = mapped_column(Float, default=0.0)
+    volume_ratio: Mapped[float] = mapped_column(Float, default=0.0)
+    relative_strength: Mapped[float] = mapped_column(Float, default=0.0)
+    atr: Mapped[float] = mapped_column(Float, default=0.0)
+    entry_price: Mapped[float] = mapped_column(Float, default=0.0)
+    stop_loss: Mapped[float] = mapped_column(Float, default=0.0)
+    target_1: Mapped[float] = mapped_column(Float, default=0.0)
+    target_2: Mapped[float] = mapped_column(Float, default=0.0)
+    risk_reward: Mapped[float] = mapped_column(Float, default=0.0)
+    score_breakdown: Mapped[dict] = mapped_column(JSON, default=dict)
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ScannerStatusRecord(Base):
+    """Metadaten des letzten Scan-Durchlaufs (genau eine Zeile, id=1)."""
+
+    __tablename__ = "scanner_status"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    last_scan_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    universe_size: Mapped[int] = mapped_column(Integer, default=0)
+    scanned_symbols: Mapped[int] = mapped_column(Integer, default=0)
+    signals_found: Mapped[int] = mapped_column(Integer, default=0)
+    failed_symbols: Mapped[int] = mapped_column(Integer, default=0)
+    duration_seconds: Mapped[float] = mapped_column(Float, default=0.0)
+    running: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class BacktestRecord(Base):
     """Ergebnis eines Backtest-Laufs inklusive Kennzahlen."""
 
