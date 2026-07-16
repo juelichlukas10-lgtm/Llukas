@@ -240,13 +240,21 @@ class ScannerPaperTrader:
         total = cost + fee
 
         if total > self._cash:
+            # Kapital reicht nicht für die volle risikobasierte Größe – auf
+            # das verfügbare Bargeld herunterskalieren, aber siehe unten:
+            # bei zu kleinem Rest wird der Einstieg komplett übersprungen
+            # statt eine wertlose "Staub"-Position zu eröffnen.
             scale = self._cash / total * 0.99 if total > 0 else 0.0
             amount *= scale
             cost = amount * signal.entry_price
             fee = cost * self._config.commission_rate
             total = cost + fee
-        if amount <= 0 or total > self._cash:
-            logger.debug("Scanner: unzureichendes Kapital für %s – Einstieg übersprungen", signal.symbol)
+        if amount <= 0 or total > self._cash or cost < self._config.min_position_value:
+            logger.debug(
+                "Scanner: unzureichendes Kapital für %s (Positionswert %.2f < Minimum %.2f) "
+                "– Einstieg übersprungen",
+                signal.symbol, cost, self._config.min_position_value,
+            )
             return None
 
         self._cash -= total

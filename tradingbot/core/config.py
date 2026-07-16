@@ -300,6 +300,10 @@ class ScannerPaperTradingConfig(BaseModel):
         max_open_positions: Maximal gleichzeitig offene Positionen.
         partial_exit_at_target1: Bei Erreichen von Ziel 1 die Hälfte verkaufen
             und den Stop auf den Einstand ziehen, statt komplett zu schließen.
+        min_position_value: Mindest-Positionswert in Quote-Währung. Reicht
+            das verbleibende Kapital nur für eine kleinere Position, wird
+            der Einstieg übersprungen statt eine wertlose "Staub"-Position
+            zu eröffnen.
     """
 
     enabled: bool = True
@@ -308,6 +312,7 @@ class ScannerPaperTradingConfig(BaseModel):
     commission_rate: float = Field(default=0.0005, ge=0, lt=0.05)
     max_open_positions: int = Field(default=10, ge=1)
     partial_exit_at_target1: bool = True
+    min_position_value: float = Field(default=250.0, ge=0)
 
 
 class ScannerConfig(BaseModel):

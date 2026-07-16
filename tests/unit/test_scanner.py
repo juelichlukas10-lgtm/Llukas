@@ -522,6 +522,48 @@ class TestScannerPaperTrader:
         assert opened == []
         db.close()
 
+    def test_low_cash_skips_instead_of_dust_position(self) -> None:
+        """Regressionstest: Rest-Kapital darf keine Positionen im Cent-Bereich
+
+        eröffnen (Bug: mehrere Einstiege im selben Zyklus zehrten das
+        Bargeld auf und erzeugten Positionen im Wert von $0.00)."""
+        db = Database(url="sqlite:///:memory:")
+        trader = self._trader(db, min_position_value=250.0)
+        trader._cash = 3.0  # reicht nur fuer eine winzige Restposition
+
+        opened, _ = trader.process_cycle(
+            {"AAA": _make_signal(entry_price=100.0, stop_loss=95.0)},
+            {"AAA": _price_df(100.0)}, set(),
+        )
+        assert opened == []
+        assert trader.open_positions == {}
+        assert trader.snapshot().cash == pytest.approx(3.0)  # Kapital unangetastet
+        db.close()
+
+    def test_cash_depletes_across_cycle_without_dust(self) -> None:
+        """Mehrere Kandidaten im selben Zyklus: kein Rest-Kapital wird zu
+
+        wertlosen Positionen verbraten, sobald es unter das Minimum faellt."""
+        db = Database(url="sqlite:///:memory:")
+        trader = self._trader(db, min_position_value=250.0, max_open_positions=20)
+        trader._cash = 1_000.0
+
+        signals = {
+            f"S{i}": _make_signal(symbol=f"S{i}", score=100.0 - i, entry_price=100.0, stop_loss=95.0)
+            for i in range(10)
+        }
+        price_data = {f"S{i}": _price_df(100.0) for i in range(10)}
+
+        opened, _ = trader.process_cycle(signals, price_data, set())
+
+        for position in trader.open_positions.values():
+            assert position.amount * position.entry_price >= 250.0
+        assert trader.snapshot().cash >= 0.0
+        # Sobald das Kapital unter die Mindest-Positionsgroesse faellt, werden
+        # weitere Kandidaten uebersprungen statt Staub-Positionen zu eroeffnen.
+        assert len(opened) < 10
+        db.close()
+
     def test_disabled_trader_does_nothing(self) -> None:
         db = Database(url="sqlite:///:memory:")
         trader = self._trader(db, enabled=False)
